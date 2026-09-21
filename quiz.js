@@ -4,12 +4,19 @@
   const bank = window.QUIZ_BANK;
   const sourceBank = window.SOURCE_BANK;
   const sourceGroups = window.SOURCE_GROUPS;
+  const notesHtml = window.STUDY_NOTES_HTML;
+  const noteLinks = window.STUDY_NOTE_LINKS;
   const root = document.getElementById("app");
   const pattern = ["mc", "mc", "disc", "mc", "mc", "disc", "mc", "mc", "disc", "mc", "mc", "disc"];
   const levels = { 1: "Básica", 2: "Intermediária", 3: "Desafio" };
   let state;
   let adaptiveSession;
   let materialSession;
+
+  function rememberSession() {
+    if (state.mode === "adaptive") adaptiveSession = state;
+    if (state.mode === "picker" || state.mode === "source") materialSession = state;
+  }
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -62,7 +69,7 @@
   }
 
   function openMaterial() {
-    if (state.mode === "adaptive") adaptiveSession = state;
+    rememberSession();
     state = materialSession ?? { mode: "picker", records: [], done: false };
     materialSession = state;
     render();
@@ -76,9 +83,16 @@
   }
 
   function openAdaptive() {
-    if (state.mode !== "adaptive") materialSession = state;
+    rememberSession();
     state = adaptiveSession;
     render();
+  }
+
+  function openNotes() {
+    rememberSession();
+    state = { mode: "notes" };
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startSource(groupId = "all") {
@@ -94,6 +108,7 @@
 
   function sidebar() {
     if (state.mode === "picker") return `<aside class="sidebar" aria-label="Material disponível"><span class="eyebrow">Material completo</span><strong class="side-title">36 questões</strong><p class="side-copy">Cinco exercícios de cada PDF de conteúdo e 11 itens do Banco de Questões. Escolha um conjunto ou faça todos.</p></aside>`;
+    if (state.mode === "notes") return `<aside class="sidebar notes-sidebar" aria-label="Índice das anotações"><span class="eyebrow">Nesta revisão</span><strong class="side-title">Mapa da matéria</strong><nav class="notes-toc" aria-label="Seções das anotações">${noteLinks.map(([id, label], index) => `<a href="#${id}"><span>${String(index + 1).padStart(2, "0")}</span>${escapeHtml(label)}</a>`).join("")}</nav><a class="back-to-top" href="#app">↑ Voltar ao topo</a></aside>`;
     const completed = state.records.length;
     const mcRecords = state.records.filter(record => record.type === "mc");
     const correct = mcRecords.filter(record => record.grade === 2).length;
@@ -193,7 +208,9 @@
   }
 
   function render() {
-    root.innerHTML = `<main class="app"><header class="top"><div class="brand"><span class="mark" aria-hidden="true">E</span>ETL &amp; OLAP</div><nav class="mode-nav" aria-label="Modos do quiz"><button type="button" class="mode-btn ${state.mode === "adaptive" ? "active" : ""}" data-action="adaptive" aria-current="${state.mode === "adaptive" ? "page" : "false"}">Treino adaptativo</button><button type="button" class="mode-btn ${state.mode !== "adaptive" ? "active" : ""}" data-action="material" aria-current="${state.mode !== "adaptive" ? "page" : "false"}">Questões do material</button></nav></header><div class="layout">${sidebar()}${state.mode === "picker" ? sourcePickerView() : state.done ? summaryView() : questionView()}</div></main>${footer()}`;
+    const materialActive = state.mode === "picker" || state.mode === "source";
+    const content = state.mode === "notes" ? notesHtml : state.mode === "picker" ? sourcePickerView() : state.done ? summaryView() : questionView();
+    root.innerHTML = `<main class="app"><header class="top"><div class="brand"><span class="mark" aria-hidden="true">E</span>ETL &amp; OLAP</div><nav class="mode-nav" aria-label="Modos do quiz"><button type="button" class="mode-btn ${state.mode === "adaptive" ? "active" : ""}" data-action="adaptive" aria-current="${state.mode === "adaptive" ? "page" : "false"}">Treino adaptativo</button><button type="button" class="mode-btn ${materialActive ? "active" : ""}" data-action="material" aria-current="${materialActive ? "page" : "false"}">Questões do material</button><button type="button" class="mode-btn ${state.mode === "notes" ? "active" : ""}" data-action="notes" aria-current="${state.mode === "notes" ? "page" : "false"}">Anotações</button></nav></header><div class="layout ${state.mode === "notes" ? "notes-layout" : ""}">${sidebar()}${content}</div></main>${footer()}`;
   }
 
   function advance() {
@@ -234,7 +251,9 @@
     if (action === "adaptive") {
       if (state.mode !== "adaptive") openAdaptive();
     } else if (action === "material") {
-      if (state.mode === "adaptive") openMaterial();
+      if (state.mode !== "picker" && state.mode !== "source") openMaterial();
+    } else if (action === "notes") {
+      if (state.mode !== "notes") openNotes();
     } else if (action === "source-picker") {
       openPicker();
     } else if (action === "source-repeat" && state.mode === "source") {
@@ -277,6 +296,7 @@
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute() {
         if (state.mode === "picker") return { mode: "material-picker", groups: [{ id: "all", count: sourceBank.length }, ...sourceGroups.map(group => ({ id: group.id, count: group.count }))] };
+        if (state.mode === "notes") return { mode: "notes", sections: noteLinks.map(([id, title]) => ({ id, title })) };
         return state.done ? { done: true, completed: state.records.length, goal: state.goal } : {
           done: false, mode: state.mode, completed: state.records.length, goal: state.goal,
           question: { type: state.current.type, topic: state.current.topic, prompt: state.current.prompt, options: state.current.options ?? null },
@@ -290,7 +310,7 @@
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute() {
-        if (state.mode === "picker" || state.done || state.revealed || state.hintCount >= 2) throw new Error("Não há outra dica disponível agora.");
+        if (state.mode === "picker" || state.mode === "notes" || state.done || state.revealed || state.hintCount >= 2) throw new Error("Não há outra dica disponível agora.");
         const hint = state.current.hints[state.hintCount++]; render();
         return { hint, hintsRevealed: state.hintCount };
       }
@@ -301,7 +321,7 @@
       inputSchema: { type: "object", properties: { answer: { type: "string", description: "Letra A–E (conforme as opções) ou texto discursivo." } }, required: ["answer"], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
-        if (state.mode === "picker" || state.done || state.revealed) throw new Error("Escolha uma questão ainda não respondida.");
+        if (state.mode === "picker" || state.mode === "notes" || state.done || state.revealed) throw new Error("Escolha uma questão ainda não respondida.");
         if (typeof input?.answer !== "string") throw new Error("Informe uma resposta em texto.");
         const question = state.current;
         if (question.type === "mc") {
@@ -323,7 +343,7 @@
       inputSchema: { type: "object", properties: { selfRating: { type: "string", enum: ["dominei", "parcial", "rever"] } }, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
-        if (state.mode === "picker" || state.done || !state.revealed) throw new Error("Confira a resposta antes de avançar.");
+        if (state.mode === "picker" || state.mode === "notes" || state.done || !state.revealed) throw new Error("Confira a resposta antes de avançar.");
         if (state.current.type === "disc") {
           const ratings = { dominei: 2, parcial: 1, rever: 0 };
           if (!Object.hasOwn(ratings, input?.selfRating)) throw new Error("Informe selfRating: dominei, parcial ou rever.");
@@ -350,4 +370,3 @@
   start();
   registerWebMcp();
 })();
-
